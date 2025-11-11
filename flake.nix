@@ -33,6 +33,7 @@
               (pkgs.lib.fileset.maybeMissing ./res)
             ];
           };
+
           strictDeps = true;
 
           buildInputs = with pkgs; [
@@ -43,19 +44,33 @@
             pkg-config
             perl
           ];
-          PKG_CONFIG_PATH = "${pkgs.openssl.dev}/lib/pkgconfig";
 
-          cargoArtifacts = craneLib.buildDepsOnly commonArgs;
+          PKG_CONFIG_PATH = "${pkgs.openssl.dev}/lib/pkgconfig";
         };
 
-        my-crate = craneLib.buildPackage commonArgs;
+        # # Build *just* the cargo dependencies, so we can reuse
+        # all of that work (e.g. via cachix) when running in CI
+        cargoArtifacts = craneLib.buildDepsOnly commonArgs;
+
+        lith = craneLib.buildPackage commonArgs // {
+          inherit cargoArtifacts;
+        };
       in
       {
+        checks.lith-nextest = craneLib.cargoNextest (
+          commonArgs
+          // {
+            inherit cargoArtifacts;
+            partitions = 1;
+            partitionType = "count";
+            cargoNextestPartitionsExtraArgs = "--no-tests=pass";
+          }
+        );
         # nix build
-        packages.default = my-crate;
+        packages.default = lith;
 
         # nix run
-        apps.default = flake-utils.lib.mkApp { drv = my-crate; };
+        apps.default = flake-utils.lib.mkApp { drv = lith; };
 
         # nix develop
         devShells.default = pkgs.mkShell {
@@ -67,8 +82,8 @@
             ])
             clippy
             rustfmt
-            cargo-edit
             cargo-nextest
+            cargo-edit
             rust-analyzer
             pkg-config # Required by git2 crate
             openssl # Required by git2 crate
